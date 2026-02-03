@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  irc-topic-bot:
+    build: .
+    container_name: irc-topic-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Uncomment for host network if needed
+    # network_mode: host
