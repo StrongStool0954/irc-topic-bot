@@ -82,6 +82,32 @@ def timestamp():
 class SpeedtestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for speedtest URL."""
 
+    def do_POST(self):
+        """Handle POST requests."""
+        if self.path == '/trigger':
+            # Trigger immediate speedtest run
+            if speedtest_running:
+                self.send_response(429)  # Too Many Requests
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b"Speedtest already running, please wait\n")
+                print(f"[{timestamp()}] Trigger request denied - speedtest already running")
+            else:
+                # Start speedtest in background thread
+                trigger_thread = threading.Thread(target=run_speedtest, daemon=True)
+                trigger_thread.start()
+
+                self.send_response(202)  # Accepted
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b"Speedtest triggered, check back in 30-60 seconds\n")
+                print(f"[{timestamp()}] Speedtest manually triggered")
+        else:
+            self.send_response(404)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Not Found\n")
+
     def do_GET(self):
         """Handle GET requests."""
         if self.path == '/speedtest' or self.path == '/speedtest.txt':
@@ -160,9 +186,10 @@ def main():
     server = HTTPServer(('0.0.0.0', HTTP_PORT), SpeedtestHandler)
     print(f"[{timestamp()}] HTTP server listening on port {HTTP_PORT}")
     print(f"[{timestamp()}] Endpoints:")
-    print(f"  GET /speedtest - Get latest speedtest URL")
-    print(f"  GET /status - Server status")
-    print(f"  GET /health - Health check")
+    print(f"  GET  /speedtest - Get latest speedtest URL")
+    print(f"  GET  /status - Server status")
+    print(f"  GET  /health - Health check")
+    print(f"  POST /trigger - Trigger immediate speedtest")
     print()
 
     try:
