@@ -20,8 +20,7 @@ services:
     container_name: speedtest-server
     restart: unless-stopped
     command: python3 speedtest_server.py
-    ports:
-      - "8888:8888"
+    network_mode: host
     environment:
       - SPEEDTEST_INTERVAL=1800
       - SPEEDTEST_HTTP_PORT=8888
