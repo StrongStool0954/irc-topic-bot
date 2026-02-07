@@ -14,3 +14,20 @@ services:
         max-file: "3"
     # Uncomment for host network if needed
     # network_mode: host
+
+  speedtest-server:
+    build: .
+    container_name: speedtest-server
+    restart: unless-stopped
+    command: python3 speedtest_server.py
+    ports:
+      - "8888:8888"
+    environment:
+      - SPEEDTEST_INTERVAL=1800
+      - SPEEDTEST_HTTP_PORT=8888
+      - SPEEDTEST_CMD=speedtest-cli --share
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

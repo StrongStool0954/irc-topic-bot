@@ -11,6 +11,7 @@ import os
 import sys
 import requests
 import json
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -19,6 +20,9 @@ class TopicMonitorBot(irc.bot.SingleServerIRCBot):
     def __init__(self, config):
         self.config = config
         self.topics = {}  # Store current topics per channel
+        self.current_position = None  # Track current queue position
+        self.position_total = None  # Track total queue size
+        self.position_check_scheduled = False  # Track if periodic check is running
 
         # Set up SSL connection factory
         ssl_context = ssl.create_default_context()
@@ -59,6 +63,10 @@ class TopicMonitorBot(irc.bot.SingleServerIRCBot):
             connection.join(channel)
             print(f"[{self._timestamp()}] Joined {channel}")
 
+        # Start position monitoring if enabled
+        if self.config.get('position_enabled', False):
+            self._schedule_position_check()
+
     def on_topic(self, connection, event):
         """Called when topic is received (on join or when changed)"""
         channel = event.target
@@ -98,6 +106,17 @@ class TopicMonitorBot(irc.bot.SingleServerIRCBot):
         # We can add commands here if needed
         pass
 
+    def on_privmsg(self, connection, event):
+        """Called when a private message is received"""
+        source_nick = event.source.nick
+        message = event.arguments[0] if event.arguments else ""
+
+        # Check if this is a position response
+        if self.config.get('position_enabled', False):
+            position_nick = self.config.get('position_monitor_nick')
+            if source_nick == position_nick:
+                self._handle_position_response(message)
+
     def on_disconnect(self, connection, event):
         """Called when disconnected from server"""
         print(f"[{self._timestamp()}] Disconnected from server")
@@ -106,6 +125,83 @@ class TopicMonitorBot(irc.bot.SingleServerIRCBot):
     def _timestamp(self):
         """Get formatted timestamp"""
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _schedule_position_check(self):
+        """Schedule periodic position check"""
+        if not self.position_check_scheduled:
+            self.position_check_scheduled = True
+            print(f"[{self._timestamp()}] Starting position monitoring")
+
+        # Send position query
+        self._check_position()
+
+        # Schedule next check
+        interval = self.config.get('position_check_interval', 1800)  # 30 minutes default
+        self.connection.reactor.scheduler.execute_after(
+            interval,
+            self._schedule_position_check
+        )
+
+    def _check_position(self):
+        """Send position query to the configured nick"""
+        position_nick = self.config.get('position_monitor_nick')
+        if position_nick:
+            self.connection.privmsg(position_nick, '!position')
+            print(f"[{self._timestamp()}] Querying position from {position_nick}")
+
+    def _handle_position_response(self, message):
+        """Parse position response and notify if changed"""
+        # Parse message like "You are in position 58 of 59."
+        match = re.search(r'position (\d+) of (\d+)', message, re.IGNORECASE)
+
+        if match:
+            position = int(match.group(1))
+            total = int(match.group(2))
+
+            print(f"[{self._timestamp()}] Position update: {position} of {total}")
+
+            # Check if position changed
+            if self.current_position is not None and self.current_position != position:
+                # Position changed - send notification
+                self._send_position_notification(
+                    self.current_position,
+                    position,
+                    total
+                )
+
+            # Update stored position
+            self.current_position = position
+            self.position_total = total
+        else:
+            print(f"[{self._timestamp()}] Could not parse position from: {message}")
+
+    def _send_position_notification(self, old_position, new_position, total):
+        """Send notification about position change"""
+        title = "IRC Queue Position Changed"
+        direction = "up" if new_position < old_position else "down"
+        change = abs(new_position - old_position)
+
+        message = (
+            f"Your position moved {direction} by {change}\n\n"
+            f"Old position: {old_position} of {total}\n"
+            f"New position: {new_position} of {total}"
+        )
+
+        method = self.config.get('notification_method', 'ntfy')
+
+        try:
+            if method == 'ntfy':
+                self._send_ntfy(title, message)
+            elif method == 'pushover':
+                self._send_pushover(title, message)
+            elif method == 'telegram':
+                self._send_telegram(title, message)
+            elif method == 'discord':
+                self._send_discord(title, message)
+            else:
+                print(f"[{self._timestamp()}] Unknown notification method: {method}")
+        except Exception as e:
+            print(f"[{self._timestamp()}] Failed to send position notification: {e}")
 
     def _send_notification(self, channel, old_topic, new_topic, changed_by):
         """Send notification via configured method"""
@@ -220,6 +316,11 @@ def load_config():
 
         # Discord settings
         'discord_webhook_url': os.getenv('DISCORD_WEBHOOK_URL'),
+
+        # Position monitoring settings
+        'position_enabled': os.getenv('POSITION_ENABLED', 'false').lower() == 'true',
+        'position_monitor_nick': os.getenv('POSITION_MONITOR_NICK', 'Drone'),
+        'position_check_interval': int(os.getenv('POSITION_CHECK_INTERVAL', '1800')),  # 30 minutes
     }
 
     return config
